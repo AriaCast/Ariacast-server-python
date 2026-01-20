@@ -77,18 +77,10 @@ python start.py --web-only
 
 ### Music Assistant Integration
 
-The server includes a Music Assistant plugin that integrates AriaCast as an audio source:
+The server is implemented in a Music Assistant plugin that integrates AriaCast as an audio source:
 
-1. **Copy the plugin**: Place the `ariacast_receiver.py` file in your Music Assistant providers directory
-2. **Configure**: Set up the AriaCast receiver in Music Assistant settings
-3. **Select Source**: Choose "AriaCast" as the audio source on any Music Assistant player
-4. **Stream**: Audio from AriaCast clients will play through Music Assistant
+[Link to plug in](https://github.com/AirPlr/AriaCast-Receiver-MusicAssistant)
 
-#### Plugin Features
-- **Player Selection**: Auto-select playing players or manually choose target player
-- **Source Switching**: Allow/disallow manual player switching
-- **Artwork Integration**: Downloads and displays album artwork
-- **Control Commands**: Send play/pause/next/previous commands back to AriaCast clients
 
 ## 🌐 Web Interface
 
