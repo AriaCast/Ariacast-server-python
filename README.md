@@ -1,24 +1,40 @@
 # AriaCast Server
 
-**High-performance, low-latency PCM audio streaming over WebSockets.**
+**High-performance, low-latency PCM audio streaming over WebSockets with Music Assistant integration.**
 
 AriaCast Server is a lightweight, bidirectional audio streaming receiver written in Python. It transforms any device (Windows, Linux, macOS, Raspberry Pi) into a network "speaker" capable of receiving raw PCM audio, synchronizing metadata in real-time, and offering remote volume control.
 
-Designed for stability and minimal overhead, it uses binary WebSockets for audio transport while maintaining fallback compatibility for standard HTTP players.
+Now featuring **Music Assistant plugin integration** and a **modern, artwork-enhanced web player** with glassmorphism UI and dynamic backgrounds.
 
-## Features
+## ✨ Features
 
+### 🎵 Core Audio Streaming
 - **Hybrid Audio Transport**:
-  - **WebSocket Stream**: Low-latency raw PCM transmission (48kHz/16-bit default).
-  - **HTTP Stream**: `/stream.wav` endpoint for compatibility with generic players (VLC, Browser).
-- **Bidirectional Control**:
-  - Native system volume control (Windows `pycaw` support with PowerShell fallback).
-  - Real-time metadata synchronization (Title, Artist, Artwork).
-- **Adaptive Buffering**: Smart server-side buffering to handle network jitter.
-- **Auto-Discovery**: Dual-stack discovery using Multicast DNS (Bonjour/ `_audiocast._tcp`) and custom UDP broadcast.
-- **Cross-Platform**: Core logic in Python with platform-specific extensions.
+  - **WebSocket Stream**: Low-latency raw PCM transmission (48kHz/16-bit default)
+  - **HTTP Stream**: `/stream.wav` endpoint for compatibility with generic players (VLC, Browser)
+- **Adaptive Buffering**: Smart server-side buffering to handle network jitter
+- **Cross-Platform**: Core logic in Python with platform-specific extensions
 
-## Installation
+### 🎛️ Control & Metadata
+- **Bidirectional Control**:
+  - Native system volume control (Windows `pycaw` support with PowerShell fallback)
+  - Real-time metadata synchronization (Title, Artist, Album, Artwork, Position, Duration)
+- **Artwork Support**: Automatic downloading and serving of album artwork
+- **Progress Tracking**: Real-time playback position and duration
+
+### 🔍 Discovery & Integration
+- **Auto-Discovery**: Dual-stack discovery using Multicast DNS (Bonjour/ `_audiocast._tcp`) and custom UDP broadcast
+- **Music Assistant Plugin**: Full integration as a Music Assistant provider with source selection and control
+- **Web Dashboard**: Modern, responsive web player with artwork backgrounds and visualizer
+
+### 🎨 Enhanced Web Player
+- **Glassmorphism UI**: Modern frosted glass design with backdrop blur
+- **Dynamic Backgrounds**: Album artwork automatically becomes the page background
+- **Spectrum Visualizer**: Colorful real-time audio spectrum analysis
+- **Responsive Design**: Optimized for desktop, tablet, and mobile
+- **Real-time Stats**: Buffer monitoring, sample rate, and connection status
+
+## 🚀 Installation
 
 1. **Clone the repository**:
    ```bash
@@ -33,7 +49,9 @@ Designed for stability and minimal overhead, it uses binary WebSockets for audio
    ```
    *Note: On Windows, some build tools might be required for `pycaw` or `sounddevice` depending on your environment. On Linux, you may need `libportaudio2`.*
 
-## Usage
+## 🎯 Usage
+
+### Standalone Server
 
 Start the server using the provided launcher script:
 
@@ -41,7 +59,7 @@ Start the server using the provided launcher script:
 python start.py
 ```
 
-### Command Line Options
+#### Command Line Options
 
 ```bash
 # Run with default configuration
@@ -57,15 +75,37 @@ python start.py -c living_room
 python start.py --web-only
 ```
 
----
+### Music Assistant Integration
 
-# AriaCast Protocol Specification
+The server includes a Music Assistant plugin that integrates AriaCast as an audio source:
 
-## Overview
+1. **Copy the plugin**: Place the `ariacast_receiver.py` file in your Music Assistant providers directory
+2. **Configure**: Set up the AriaCast receiver in Music Assistant settings
+3. **Select Source**: Choose "AriaCast" as the audio source on any Music Assistant player
+4. **Stream**: Audio from AriaCast clients will play through Music Assistant
 
-AriaCast is a protocol for streaming low-latency, high-quality audio over IP networks to distributed audio devices. The protocol is designed for simplicity, reliability, and minimal latency.
+#### Plugin Features
+- **Player Selection**: Auto-select playing players or manually choose target player
+- **Source Switching**: Allow/disallow manual player switching
+- **Artwork Integration**: Downloads and displays album artwork
+- **Control Commands**: Send play/pause/next/previous commands back to AriaCast clients
 
-## Architecture
+## 🌐 Web Interface
+
+Access the modern web player at:
+`http://<server-ip>:8090/`
+
+### Web Player Features
+- **🎨 Dynamic Backgrounds**: Album artwork automatically becomes the blurred page background
+- **📊 Real-time Metadata**: Title, artist, album, and playback progress
+- **🎵 Spectrum Visualizer**: Colorful audio frequency analysis
+- **🎛️ Volume Control**: Styled slider with smooth animations
+- **📈 Live Stats**: Buffer status, sample rate, channels, and connection state
+- **📱 Responsive**: Works perfectly on all device sizes
+
+## 📡 AriaCast Protocol Specification
+
+### Architecture
 
 AriaCast uses a **client-server** architecture where:
 - **Client**: Streams audio to the server, sends metadata, and controls playback
@@ -79,51 +119,7 @@ AriaCast uses a **client-server** architecture where:
 | `/stats` | JSON | Server → Client | Playback statistics |
 | `/control` | JSON | Bidirectional | Volume and playback control |
 | `/metadata` | JSON | Bidirectional | Track metadata (title, artist, artwork) |
-
-## Discovery Phase
-
-### Step 1: Discover Available Servers
-
-Clients discover AriaCast servers using one of two methods:
-
-#### Method A: mDNS (Primary, Recommended)
-
-Browse for services of type `_audiocast._tcp` using mDNS/Bonjour:
-
-```
-Service Type: _audiocast._tcp.local.
-```
-
-**TXT Records** (advertising the server's capabilities):
-
-| Key | Type | Example | Description |
-|---|---|---|---|
-| `name` | String | "Living Room Speaker" | Human-readable server name |
-| `version` | String | "1.0" | Protocol version |
-| `codecs` | String | "PCM" | Comma-separated supported codecs |
-| `samplerate` | String | "48000" | Audio sample rate in Hz |
-| `channels` | String | "2" | Number of audio channels |
-| `platform` | String | "RaspberryPi" | Server platform identifier |
-
-#### Method B: UDP Broadcast (Fallback)
-
-If mDNS is unavailable or times out:
-
-1. **Send Discovery Request**:
-   - Destination: Broadcast address (e.g., `255.255.255.255`) or network broadcast
-   - Port: `12888` (UDP)
-   - Message: ASCII string `"DISCOVER_ARIACAST"`
-
-2. **Receive Response**:
-   - Source: Server IP address
-   - Port: `12888` (UDP)
-   - Message: JSON object (UTF-8 encoded)
-
-### Step 2: Connect to Server
-
-Once a server is discovered, establish connections to the WebSocket endpoints.
-
-## Streaming Protocol
+| `/artwork` | Binary | Server → Client | Downloaded album artwork |
 
 ### Audio Streaming (`/audio` endpoint)
 
@@ -145,20 +141,9 @@ Duration:        20 milliseconds
 Frame Size:      960 samples × 2 channels × 2 bytes = 3840 bytes
 ```
 
-### Control (`/control` endpoint)
-
-The control endpoint allows bidirectional communication for volume and playback control.
-
-**Volume Commands** (Client → Server):
-```json
-{"command": "volume", "direction": "up"}
-{"command": "volume", "direction": "down"}
-{"command": "volume_set", "level": 75}
-```
-
 ### Metadata (`/metadata` endpoint)
 
-The metadata endpoint allows clients to push track information and receive updates.
+Enhanced metadata support with artwork downloading:
 
 **Update Metadata** (Client → Server):
 ```json
@@ -169,42 +154,109 @@ The metadata endpoint allows clients to push track information and receive updat
     "artist": "Artist Name",
     "album": "Album Name",
     "artwork_url": "https://example.com/cover.jpg",
+    "artworkUrl": "https://example.com/cover.jpg",
+    "duration_ms": 240000,
+    "position_ms": 45000,
     "is_playing": true
   }
 }
 ```
 
-## Network Topology
+### Control (`/control` endpoint)
 
-```
-Local Area Network (192.168.1.0/24)
-├─ AudioCast Server
-│  ├─ mDNS Advertiser (_audiocast._tcp)
-│  ├─ UDP Discovery Listener (port 12888)
-│  └─ WebSocket Server (port 12889)
-│
-└─ Clients
-   ├─ Discovery Phase (mDNS or UDP)
-   └─ Streaming Phase (WebSockets)
+**Volume Commands** (Client → Server):
+```json
+{"command": "volume", "direction": "up"}
+{"command": "volume", "direction": "down"}
+{"command": "volume_set", "level": 75}
 ```
 
----
+**Playback Commands** (Server → Client, Music Assistant integration):
+```json
+{"action": "play"}
+{"action": "pause"}
+{"action": "next"}
+{"action": "previous"}
+```
 
-## Web Dashboard
+## 🔧 Configuration
 
-The server includes a built-in web dashboard and player accessible at:
-`http://<server-ip>:8090/`
+### Server Configuration
 
-This allows you to listen to the stream directly from a browser or view server statistics.
+Edit `config_examples.py` or modify the `ServerConfig` class:
 
-## Requirements
+```python
+@dataclass
+class ServerConfig:
+    SERVER_NAME: str = "My AriaCast Speaker"
+    VERSION: str = "1.0"
+    PLATFORM: str = "Music Assistant"
+    DISCOVERY_PORT: int = 12888
+    STREAMING_PORT: int = 12889
+    WEB_PORT: int = 8090
+    ENABLE_LOCAL_AUDIO: bool = True
+    AUDIO: AudioConfig = AudioConfig()
+```
 
+### Music Assistant Plugin Configuration
+
+When setting up the AriaCast provider in Music Assistant:
+
+- **Connected Music Assistant Player**: Choose target player or set to "Auto"
+- **Allow manual player switching**: Enable to select AriaCast on any player
+- **Server Name**: Display name for device discovery
+- **Streaming Port**: WebSocket port (default: 12889)
+- **Discovery Port**: UDP discovery port (default: 12888)
+
+## 📋 Requirements
+
+### Core Dependencies
 - `aiohttp` - Async Web Server
 - `sounddevice` - Audio Playback
 - `zeroconf` - mDNS Discovery
 - `numpy` - Audio Buffer Management
-- `pycaw` - Windows Core Audio Library (Optional, for volume control)
 
-## License
+### Optional Dependencies
+- `pycaw` - Windows Core Audio Library (volume control)
+- `music-assistant` - For plugin integration
 
-MIT License
+### System Requirements
+- **Python**: 3.9+
+- **Audio**: PortAudio-compatible sound system
+- **Network**: Multicast DNS support (Bonjour/Avahi)
+
+## 🏗️ Architecture
+
+```
+Local Area Network
+├─ AriaCast Server
+│  ├─ Audio Playback (sounddevice)
+│  ├─ WebSocket Server (aiohttp)
+│  │  ├─ /audio - Audio stream
+│  │  ├─ /control - Bidirectional control
+│  │  ├─ /metadata - Track information
+│  │  ├─ /stats - Playback statistics
+│  │  └─ /artwork - Album artwork
+│  ├─ UDP Discovery (12888)
+│  ├─ mDNS Advertiser (_audiocast._tcp)
+│  └─ Web Dashboard (8090)
+│
+├─ Music Assistant (Optional)
+│  └─ AriaCast Provider Plugin
+│
+└─ AriaCast Clients
+   ├─ Discovery Phase (mDNS/UDP)
+   └─ Streaming Phase (WebSockets)
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit pull requests, report issues, or suggest enhancements.
+
+## 📄 License
+
+MIT License - see LICENSE file for details
+
+---
+
+**Made with ❤️ for seamless audio streaming**

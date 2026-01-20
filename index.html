@@ -3,74 +3,532 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AudioCast Web Player</title>
+    <title>AriaCast Web Player</title>
     <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: #1a1a1a;
-            color: #ffffff;
+            font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
-            margin: 0;
+            overflow-x: hidden;
+            position: relative;
         }
-        .player-card {
-            background: #2d2d2d;
-            padding: 2rem;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            text-align: center;
-            width: 90%;
-            max-width: 400px;
-        }
-        h1 { margin: 0 0 1rem 0; font-size: 1.5rem; }
-        .status { color: #888; margin-bottom: 2rem; font-size: 0.9rem; }
-        .status.connected { color: #4CAF50; }
-        .controls { display: flex; gap: 1rem; justify-content: center; margin-bottom: 1.5rem; align-items: center; }
-        button {
-            background: #4CAF50;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover { background: #45a049; }
-        button:disabled { background: #555; cursor: not-allowed; }
-        button.stop { background: #f44336; }
-        button.stop:hover { background: #d32f2f; }
-        
-        input[type=range] { vertical-align: middle; }
 
-        .metadata { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #444; }
-        .track-title { font-weight: bold; font-size: 1.1rem; margin-bottom: 0.25rem; }
-        .track-artist { color: #bbb; }
-        #visualizer { width: 100%; height: 60px; background: #222; margin-bottom: 1rem; border-radius: 4px; }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--artwork-bg, linear-gradient(135deg, #667eea 0%, #764ba2 100%)) center/cover no-repeat;
+            filter: blur(20px) brightness(0.3) saturate(1.2);
+            z-index: -1;
+            opacity: 0;
+            transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body.artwork-loaded::before {
+            opacity: 1;
+        }
+
+        .player-container {
+            width: 100%;
+            max-width: 480px;
+            padding: 20px;
+            position: relative;
+        }
+
+        .player-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 24px;
+            padding: 32px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .player-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+            border-radius: 24px 24px 0 0;
+            z-index: -1;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 32px;
+            position: relative;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, #e0e7ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 8px;
+            letter-spacing: -0.5px;
+        }
+
+        .status {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff6b6b;
+            animation: pulse 2s infinite;
+        }
+
+        .status.connected::before {
+            background: #4ecdc4;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .artwork-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            margin: 0 auto 24px;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+
+        .artwork {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .artwork.loaded {
+            opacity: 1;
+        }
+
+        .artwork-placeholder {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: rgba(255, 255, 255, 0.3);
+        }
+
+        .metadata {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .track-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+            line-height: 1.2;
+            min-height: 58px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .track-artist {
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .track-album {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 400;
+            margin-bottom: 16px;
+        }
+
+        .progress-container {
+            margin-bottom: 24px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4ecdc4 0%, #44a08d 100%);
+            border-radius: 2px;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        .time-display {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            font-weight: 500;
+        }
+
+        .visualizer-container {
+            margin-bottom: 24px;
+        }
+
+        #visualizer {
+            width: 100%;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .control-btn {
+            width: 56px;
+            height: 56px;
+            border: none;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .control-btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            transition: all 0.3s ease;
+        }
+
+        .control-btn:hover::before {
+            width: 120%;
+            height: 120%;
+        }
+
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+
+        .control-btn.play {
+            background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%);
+            box-shadow: 0 4px 16px rgba(78, 205, 196, 0.3);
+        }
+
+        .control-btn.play:hover {
+            background: linear-gradient(135deg, #44a08d 0%, #3d8b7d 100%);
+            box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
+        }
+
+        .control-btn.stop {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            box-shadow: 0 4px 16px rgba(255, 107, 107, 0.3);
+        }
+
+        .control-btn.stop:hover {
+            background: linear-gradient(135deg, #ee5a52 0%, #dc4545 100%);
+            box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+        }
+
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 12px 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .volume-label {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .volume-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            transition: transform 0.2s ease;
+        }
+
+        .volume-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .volume-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #fff;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .stats {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+            line-height: 1.4;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .stat-label {
+            opacity: 0.7;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        @media (max-width: 480px) {
+            .player-container {
+                padding: 16px;
+            }
+
+            .player-card {
+                padding: 24px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .artwork-container {
+                width: 160px;
+                height: 160px;
+            }
+
+            .track-title {
+                font-size: 20px;
+                min-height: 48px;
+            }
+
+            .track-artist {
+                font-size: 16px;
+            }
+
+            .track-album {
+                font-size: 14px;
+            }
+
+            .controls {
+                gap: 12px;
+            }
+
+            .control-btn {
+                width: 48px;
+                height: 48px;
+                font-size: 18px;
+            }
+
+            .volume-control {
+                padding: 10px 16px;
+            }
+        }
+
+        @media (max-width: 360px) {
+            .player-card {
+                padding: 20px;
+            }
+
+            .artwork-container {
+                width: 140px;
+                height: 140px;
+            }
+
+            .track-title {
+                font-size: 18px;
+                min-height: 42px;
+            }
+
+            .controls {
+                gap: 8px;
+            }
+
+            .control-btn {
+                width: 44px;
+                height: 44px;
+                font-size: 16px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="player-card">
-        <h1>AudioCast Player</h1>
-        <div id="status" class="status">Disconnected</div>
-        
-        <canvas id="visualizer"></canvas>
+    <div class="player-container">
+        <div class="player-card">
+            <div class="header">
+                <h1>AriaCast Player</h1>
+                <div id="status" class="status">Disconnected</div>
+            </div>
 
-        <div class="controls">
-            <button id="btn-play">Start Listening</button>
-            <button id="btn-stop" class="stop" disabled>Stop</button>
-        </div>
-        <div class="controls">
-             <label for="volume">Volume: </label>
-             <input type="range" id="volume" min="0" max="100" value="100">
-        </div>
+            <div class="artwork-container">
+                <div class="artwork-placeholder">♪</div>
+                <img id="artwork" class="artwork" alt="Album Art">
+            </div>
 
-        <div class="metadata">
-            <div id="meta-title" class="track-title">-</div>
-            <div id="meta-artist" class="track-artist">-</div>
+            <div class="metadata">
+                <div id="meta-title" class="track-title">-</div>
+                <div id="meta-artist" class="track-artist">-</div>
+                <div id="meta-album" class="track-album">-</div>
+            </div>
+
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <div class="time-display">
+                    <span id="current-time">0:00</span>
+                    <span id="total-time">0:00</span>
+                </div>
+            </div>
+
+            <div class="visualizer-container">
+                <canvas id="visualizer"></canvas>
+            </div>
+
+            <div class="controls">
+                <button id="btn-previous" class="control-btn" title="Previous Track">⏮</button>
+                <button id="btn-connect" class="control-btn connect" title="Connect">🔌</button>
+                <button id="btn-play" class="control-btn play" title="Start Listening">▶</button>
+                <button id="btn-stop" class="control-btn stop" disabled title="Stop">⏹</button>
+                <button id="btn-next" class="control-btn" title="Next Track">⏭</button>
+            </div>
+
+            <div class="volume-control">
+                <span class="volume-label">Volume</span>
+                <input type="range" id="volume" class="volume-slider" min="0" max="100" value="100">
+            </div>
+
+            <div class="stats">
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <span class="stat-label">Buffer</span>
+                        <span id="stat-buffer" class="stat-value">0ms</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Sample Rate</span>
+                        <span id="stat-samplerate" class="stat-value">48kHz</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Channels</span>
+                        <span id="stat-channels" class="stat-value">2</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Status</span>
+                        <span id="stat-status" class="stat-value">Idle</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">WS Audio</span>
+                        <span id="stat-ws-audio" class="stat-value">Disconnected</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">WS Meta</span>
+                        <span id="stat-ws-meta" class="stat-value">Disconnected</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">WS Control</span>
+                        <span id="stat-ws-control" class="stat-value">Disconnected</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -84,97 +542,355 @@
         let wsMeta;
         let sampleRate = 48000;
         let channels = 2;
-        
+        let currentMetadata = {};
+        let artworkLoading = false;
+        let lastMetadataUpdate = 0;
+        let visualizerFrameId = null;
+        // Visualizer state
+        let analyser = null;
+        let dataArray = null;
+        let lastVisualizerTime = 0;
+        const VISUALIZER_FPS = 30; // Limit to 30 FPS
+        const VISUALIZER_INTERVAL = 1000 / VISUALIZER_FPS;
+
+        // Position tracking for progress bar
+        let lastPositionMs = 0;
+        let lastPositionTs = 0;
+
+        // Autoplay flag: when true, attempt to start playback once connected
+        let shouldAutoplay = false;
+
+        function triggerAutoplay() {
+            if (!shouldAutoplay) return;
+            // Ensure audio context is initialized
+            initAudio();
+            // Only attempt play when control socket is open
+            if (wsControl && wsControl.readyState === WebSocket.OPEN) {
+                sendControlCommand('play');
+                shouldAutoplay = false;
+                statusEl.textContent = 'Playing (autoplay)';
+            } else {
+                // Retry shortly until control socket is available
+                setTimeout(triggerAutoplay, 300);
+            }
+        }
+
         // UI Elements
         const statusEl = document.getElementById('status');
+        const btnConnect = document.getElementById('btn-connect');
         const btnPlay = document.getElementById('btn-play');
         const btnStop = document.getElementById('btn-stop');
+        const btnPrevious = document.getElementById('btn-previous');
+        const btnNext = document.getElementById('btn-next');
         const volSlider = document.getElementById('volume');
         const canvas = document.getElementById('visualizer');
         const ctxCanvas = canvas.getContext('2d');
+        const artworkImg = document.getElementById('artwork');
+        const progressFill = document.getElementById('progress-fill');
+        const currentTimeEl = document.getElementById('current-time');
+        const totalTimeEl = document.getElementById('total-time');
+        const statBuffer = document.getElementById('stat-buffer');
+        const statSampleRate = document.getElementById('stat-samplerate');
+        const statChannels = document.getElementById('stat-channels');
+        const statStatus = document.getElementById('stat-status');
+        const statWSAudio = document.getElementById('stat-ws-audio');
+        const statWSMeta = document.getElementById('stat-ws-meta');
+        const statWSControl = document.getElementById('stat-ws-control');
 
-        // Visualizer
-        let analyser;
-        let dataArray;
-        
+        // WebSocket connections
+        // wsAudio and wsMeta declared above
+        let wsControl;
+
+        function updateWSStatus(name, state) {
+            // name: 'audio' | 'meta' | 'control'
+            const map = {
+                'audio': statWSAudio,
+                'meta': statWSMeta,
+                'control': statWSControl
+            };
+            const el = map[name];
+            if (!el) return;
+            el.textContent = state;
+        } 
+
+        function safeClose(ws) {
+            try {
+                if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+            } catch(e) {}
+        }
+
         function initAudio() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                
+
                 // Gain Node (Volume)
                 gainNode = audioCtx.createGain();
                 gainNode.gain.value = volSlider.value / 100;
                 gainNode.connect(audioCtx.destination);
-                
+
                 // Analyser (Visuals)
                 analyser = audioCtx.createAnalyser();
                 analyser.fftSize = 256;
-                // We do NOT connect analyser to destination in series anymore
-                // We will connect source to both Gain (Audio) and Analyser (Visuals)
-                
+                analyser.smoothingTimeConstant = 0.8;
+
                 dataArray = new Uint8Array(analyser.frequencyBinCount);
-                drawVisualizer();
+                // Don't start visualizer immediately, wait for playback
             }
+
+            // Try to resume if suspended (required for autoplay)
             if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+                audioCtx.resume().then(() => {
+                    console.log('AudioContext resumed');
+                }).catch((err) => {
+                    console.log('AudioContext resume failed:', err);
+                    // This is expected in browsers that require user interaction
+                });
             }
         }
-        
+
         volSlider.oninput = () => {
-             if (gainNode) {
-                 gainNode.gain.value = volSlider.value / 100;
-             }
+            if (gainNode) {
+                gainNode.gain.value = volSlider.value / 100;
+            }
         };
 
-        function drawVisualizer() {
-            requestAnimationFrame(drawVisualizer);
-            if (!analyser) return;
+function drawVisualizer(currentTime = 0) {
+            if (!analyser || !isPlaying) {
+                if (visualizerFrameId) {
+                    cancelAnimationFrame(visualizerFrameId);
+                    visualizerFrameId = null;
+                }
+                return;
+            }
+
+            // Throttle to target FPS
+            if (currentTime - lastVisualizerTime < VISUALIZER_INTERVAL) {
+                visualizerFrameId = requestAnimationFrame(drawVisualizer);
+                return;
+            }
+            lastVisualizerTime = currentTime;
 
             const width = canvas.width;
             const height = canvas.height;
-            
+
             analyser.getByteFrequencyData(dataArray);
 
-            ctxCanvas.fillStyle = '#222';
+            // Clear with fade effect
+            ctxCanvas.fillStyle = 'rgba(255, 255, 255, 0.08)';
             ctxCanvas.fillRect(0, 0, width, height);
 
             const barWidth = (width / dataArray.length) * 2.5;
             let barHeight;
             let x = 0;
 
+            // Batch drawing for better performance
             for(let i = 0; i < dataArray.length; i++) {
-                barHeight = dataArray[i] / 2;
-                ctxCanvas.fillStyle = `rgb(${barHeight + 100}, 50, 50)`;
+                barHeight = (dataArray[i] / 255) * height * 0.8;
+                const hue = (i / dataArray.length) * 360;
+                ctxCanvas.fillStyle = `hsl(${hue}, 70%, 60%)`;
                 ctxCanvas.fillRect(x, height - barHeight, barWidth, barHeight);
                 x += barWidth + 1;
+            }
+
+            visualizerFrameId = requestAnimationFrame(drawVisualizer);
+        }
+
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return '0:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function updatePlaybackState(isPlaying) {
+            const statusEl = document.getElementById('status');
+            const playBtn = document.getElementById('btn-play');
+            
+            if (isPlaying === true) {
+                statusEl.classList.add('connected');
+                playBtn.innerHTML = '⏸'; // Pause symbol
+                playBtn.title = 'Pause';
+            } else if (isPlaying === false) {
+                statusEl.classList.add('connected');
+                playBtn.innerHTML = '▶'; // Play symbol
+                playBtn.title = 'Resume';
+            }
+            // If isPlaying is undefined/null, keep current state
+        }
+
+        function updateMetadata(data) {
+            // Debounce rapid metadata updates
+            const now = Date.now();
+            if (now - lastMetadataUpdate < 100) return; // Minimum 100ms between updates
+            lastMetadataUpdate = now;
+
+            currentMetadata = data || {};
+
+            // Track last known position timestamp so we can estimate client-side progress
+            if (typeof data.position_ms === 'number') {
+                lastPositionMs = data.position_ms;
+                lastPositionTs = Date.now();
+            }
+
+            // Batch DOM updates for better performance
+            const title = data.title || '-';
+            const artist = data.artist || '-';
+            const album = data.album || '-';
+
+            // Only update if changed
+            const titleEl = document.getElementById('meta-title');
+            const artistEl = document.getElementById('meta-artist');
+            const albumEl = document.getElementById('meta-album');
+
+            if (titleEl.textContent !== title) titleEl.textContent = title;
+            if (artistEl.textContent !== artist) artistEl.textContent = artist;
+            if (albumEl.textContent !== album) albumEl.textContent = album;
+            
+            // Update playback state indicator
+            updatePlaybackState(data.is_playing);
+
+            // Handle artwork with loading state
+            updateArtwork(data);
+            updateProgress();
+            startProgressUpdates(); // Adjust update frequency based on available data
+        }
+
+        function updateArtwork(data) {
+            if (artworkLoading) return; // Prevent concurrent loads
+
+            const artworkUrl = data.artwork_url || data.artworkUrl;
+            const currentBg = document.body.style.getPropertyValue('--artwork-bg');
+
+            if (artworkUrl && artworkUrl !== '/artwork') {
+                const bgUrl = `url('${artworkUrl}')`;
+                if (currentBg !== bgUrl) {
+                    artworkLoading = true;
+                    // Preload image before updating background
+                    const img = new Image();
+                    img.onload = () => {
+                        document.body.style.setProperty('--artwork-bg', bgUrl);
+                        artworkImg.src = artworkUrl;
+                        artworkImg.onload = () => {
+                            artworkImg.classList.add('loaded');
+                            document.body.classList.add('artwork-loaded');
+                            artworkLoading = false;
+                        };
+                    };
+                    img.onerror = () => {
+                        artworkLoading = false;
+                    };
+                    img.src = artworkUrl;
+                }
+            } else if (artworkUrl === '/artwork') {
+                const timestamp = Date.now();
+                const bgUrl = `url('/artwork?${timestamp}')`;
+                if (currentBg !== bgUrl) {
+                    artworkLoading = true;
+                    artworkImg.src = `/artwork?${timestamp}`;
+                    artworkImg.onload = () => {
+                        document.body.style.setProperty('--artwork-bg', bgUrl);
+                        artworkImg.classList.add('loaded');
+                        document.body.classList.add('artwork-loaded');
+                        artworkLoading = false;
+                    };
+                    artworkImg.onerror = () => {
+                        artworkLoading = false;
+                    };
+                }
+            } else {
+                if (currentBg !== 'none') {
+                    document.body.style.setProperty('--artwork-bg', 'none');
+                    artworkImg.classList.remove('loaded');
+                    document.body.classList.remove('artwork-loaded');
+                }
+            }
+        }
+
+        // Update the progress bar and time display
+        function updateProgress() {
+            const duration = (currentMetadata && currentMetadata.duration_ms) ? currentMetadata.duration_ms : null;
+            let position = null;
+
+            if (typeof currentMetadata.position_ms === 'number') {
+                // Use last known position if available (may be slightly behind)
+                position = currentMetadata.position_ms;
+                // If we have a timestamp, estimate forward when playing
+                if (lastPositionTs && currentMetadata.is_playing) {
+                    const delta = Date.now() - lastPositionTs;
+                    position = lastPositionMs + delta;
+                }
+            } else if (typeof lastPositionMs === 'number' && lastPositionMs > 0) {
+                position = lastPositionMs;
+            }
+
+            if (duration && position !== null && duration > 0) {
+                const pct = Math.max(0, Math.min(100, (position / duration) * 100));
+                progressFill.style.width = `${pct}%`;
+                currentTimeEl.textContent = formatTime(Math.floor(position / 1000));
+                totalTimeEl.textContent = formatTime(Math.floor(duration / 1000));
+            } else {
+                progressFill.style.width = `0%`;
+                currentTimeEl.textContent = '0:00';
+                totalTimeEl.textContent = '0:00';
             }
         }
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = window.location.host;
-            
+            const host = window.location.hostname;
+            const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+            const streamPort = '12889';
+            const streamHost = `${host}:${streamPort}`;
+
+            console.log('Connecting to WebSockets...');
+            console.log('Audio WS:', `${protocol}//${host}:${port}/listen`);
+            console.log('Meta WS:', `${protocol}//${host}:${port}/metadata`);
+            console.log('Control WS:', `${protocol}//${streamHost}/control`);
+
+            // Close any existing sockets first
+            safeClose(wsAudio); safeClose(wsMeta); safeClose(wsControl);
+            wsAudio = null; wsMeta = null; wsControl = null;
+
             // Connect to Audio Stream
-            wsAudio = new WebSocket(`${protocol}//${host}/listen`);
+            updateWSStatus('audio', 'Connecting...');
+            wsAudio = new WebSocket(`${protocol}//${host}:${port}/listen`);
             wsAudio.binaryType = 'arraybuffer';
-            
+
             wsAudio.onopen = () => {
+                updateWSStatus('audio', 'Connected');
                 statusEl.textContent = 'Connected (Buffering...)';
                 statusEl.classList.add('connected');
                 isPlaying = true;
-                btnPlay.disabled = true;
+                btnConnect.disabled = true;
+                btnPlay.disabled = false;
                 btnStop.disabled = false;
+                btnPrevious.disabled = false;
+                btnNext.disabled = false;
+                statStatus.textContent = 'Buffering';
+                // Start visualizer when audio starts
+                if (analyser) {
+                    drawVisualizer();
+                }
                 console.log("WS Audio Connected");
+                // Attempt autoplay if requested (control may come later)
+                triggerAutoplay();
             };
 
             wsAudio.onmessage = (event) => {
                 if (typeof event.data === 'string') {
                     // Config message
                     const config = JSON.parse(event.data);
-                    if (config.sample_rate) sampleRate = config.sample_rate;
-                    if (config.channels) channels = config.channels;
+                    if (config.sample_rate) {
+                        sampleRate = config.sample_rate;
+                        statSampleRate.textContent = `${(sampleRate / 1000).toFixed(0)}kHz`;
+                    }
+                    if (config.channels) {
+                        channels = config.channels;
+                        statChannels.textContent = channels.toString();
+                    }
                     console.log(`Config: ${sampleRate}Hz, ${channels}ch`);
-                    statusEl.textContent = `Connected (${sampleRate}Hz, ${channels}ch)`;
+                    statusEl.textContent = `Connected (${(sampleRate / 1000).toFixed(0)}kHz, ${channels}ch)`;
+                    statStatus.textContent = 'Playing';
                 } else {
                     // Audio Data (ArrayBuffer)
                     scheduleAudio(event.data);
@@ -182,85 +898,267 @@
             };
 
             wsAudio.onclose = () => {
+                updateWSStatus('audio', 'Disconnected');
                 statusEl.textContent = 'Disconnected';
                 statusEl.classList.remove('connected');
+                statStatus.textContent = 'Disconnected';
+                btnPlay.disabled = false;
+                btnStop.disabled = true;
+                btnPrevious.disabled = true;
+                btnNext.disabled = true;
+                btnConnect.disabled = false;
                 stop();
+                console.log("WS Audio Disconnected");
+            };
+
+            wsAudio.onerror = (error) => {
+                updateWSStatus('audio', 'Error');
+                console.error('WS Audio Error:', error);
+                statusEl.textContent = 'Connection Error';
+                statStatus.textContent = 'Error';
             };
 
             // Connect to Metadata
-            wsMeta = new WebSocket(`${protocol}//${host}/metadata`);
+            updateWSStatus('meta', 'Connecting...');
+            wsMeta = new WebSocket(`${protocol}//${host}:${port}/metadata`);
+            wsMeta.onopen = () => { updateWSStatus('meta', 'Connected'); };
             wsMeta.onmessage = (event) => {
                 try {
                     const msg = JSON.parse(event.data);
                     if (msg.type === "metadata" || msg.type === "update") {
-                        const data = msg.data || {};
-                        document.getElementById('meta-title').textContent = data.title || '-';
-                        document.getElementById('meta-artist').textContent = data.artist || '-';
+                        // Use requestAnimationFrame to debounce DOM updates
+                        requestAnimationFrame(() => updateMetadata(msg.data || {}));
                     }
-                } catch(e) {}
-            };
-        }
-
-        function scheduleAudio(buffer) {
-            // Convert Int16 PCM to Float32
-            const int16 = new Int16Array(buffer);
-            const float32 = new Float32Array(int16.length);
-            for (let i = 0; i < int16.length; i++) {
-                float32[i] = int16[i] / 32768.0;
-            }
-
-            // De-interleave if stereo
-            const bufferChannels = channels; // usually 2
-            const frameCount = float32.length / bufferChannels;
-            
-            const audioBuffer = audioCtx.createBuffer(bufferChannels, frameCount, sampleRate);
-            
-            for (let channel = 0; channel < bufferChannels; channel++) {
-                const nowBuffering = audioBuffer.getChannelData(channel);
-                for (let i = 0; i < frameCount; i++) {
-                    nowBuffering[i] = float32[i * bufferChannels + channel];
+                } catch(e) {
+                    // Silently ignore parse errors to prevent spam
                 }
+            };
+            wsMeta.onclose = () => { updateWSStatus('meta', 'Disconnected'); };
+            wsMeta.onerror = (err) => { updateWSStatus('meta', 'Error'); console.error('WS Metadata Error:', err); };
+
+            // Connect to Control (try stream port first, then fallback to web port)
+            updateWSStatus('control', 'Connecting...');
+            function openControl(url, fallback) {
+                wsControl = new WebSocket(url);
+                wsControl.onopen = () => {
+                    updateWSStatus('control', 'Connected');
+                    console.log('WS Control Connected', url);
+                    btnConnect.disabled = true;
+                    btnPlay.disabled = false;
+                    // Attempt autoplay if requested
+                    triggerAutoplay();
+                };
+                wsControl.onmessage = (event) => {
+                    try {
+                        const msg = JSON.parse(event.data);
+                        if (msg.type === "ack") {
+                            console.log("Control command acknowledged:", msg.command);
+                        }
+                    } catch(e) {
+                        console.log("Control WS message:", event.data);
+                    }
+                };
+                wsControl.onclose = () => {
+                    updateWSStatus('control', 'Disconnected');
+                    btnConnect.disabled = false;
+                    console.log('WS Control Disconnected', url);
+                };
+                wsControl.onerror = (error) => {
+                    updateWSStatus('control', 'Error');
+                    console.error('WS Control Error:', error, url);
+                    // Try fallback once
+                    if (fallback) {
+                        setTimeout(() => {
+                            console.log('Trying control fallback:', fallback);
+                            openControl(fallback, null);
+                        }, 500);
+                    }
+                };
             }
 
-            const source = audioCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            
-            // Connect to Audio Output (via Gain)
-            source.connect(gainNode);
-            
-            // Connect to Visualizer
-            source.connect(analyser);
-            
-            // Scheduling
-            // Ensure we don't schedule in the past
-            const startTime = Math.max(audioCtx.currentTime, nextStartTime);
-            source.start(startTime);
-            
-            nextStartTime = startTime + audioBuffer.duration;
-            
-            // Basic drift correction: if we fall too far behind, jump ahead
-            if (nextStartTime < audioCtx.currentTime) {
-                nextStartTime = audioCtx.currentTime;
+            openControl(`${protocol}//${streamHost}/control`, `${protocol}//${host}:${port}/control`);
+        }
+        function scheduleAudio(buffer) {
+            // If audio context not initialized (user hasn't interacted), drop frames safely
+            if (!audioCtx || !gainNode) {
+                // Optionally, you could buffer frames here for playback after user gesture
+                console.warn('AudioContext not initialized yet – dropping audio frame');
+                return;
             }
-             // If we are too far ahead (latency), that's fine, it's buffering.
+
+            // Convert Int16 PCM to Float32
+            try {
+                const int16 = new Int16Array(buffer);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768.0;
+                }
+
+                // De-interleave if stereo
+                const bufferChannels = channels;
+                const frameCount = float32.length / bufferChannels;
+
+                const audioBuffer = audioCtx.createBuffer(bufferChannels, frameCount, sampleRate);
+
+                for (let channel = 0; channel < bufferChannels; channel++) {
+                    const nowBuffering = audioBuffer.getChannelData(channel);
+                    for (let i = 0; i < frameCount; i++) {
+                        nowBuffering[i] = float32[i * bufferChannels + channel];
+                    }
+                }
+
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+
+                // Connect to Audio Output (via Gain)
+                source.connect(gainNode);
+
+                // Connect to Visualizer if available
+                if (analyser) {
+                    source.connect(analyser);
+                }
+
+                // Scheduling
+                const startTime = Math.max(audioCtx.currentTime, nextStartTime);
+                source.start(startTime);
+
+                nextStartTime = startTime + audioBuffer.duration;
+
+                // Update buffer stats
+                const bufferMs = ((nextStartTime - audioCtx.currentTime) * 1000).toFixed(0);
+                statBuffer.textContent = `${bufferMs}ms`;
+
+                // Basic drift correction
+                if (nextStartTime < audioCtx.currentTime) {
+                    nextStartTime = audioCtx.currentTime;
+                }
+            } catch (err) {
+                console.error('Failed to schedule audio frame:', err);
+            }
         }
 
         function stop() {
             isPlaying = false;
             btnPlay.disabled = false;
-            btnStop.disabled = true;
+            btnStop.disabled = false;
             if (wsAudio) wsAudio.close();
             if (wsMeta) wsMeta.close();
             if (audioCtx) audioCtx.suspend();
             nextStartTime = 0;
+            statStatus.textContent = 'Stopped';
+            statBuffer.textContent = '0ms';
         }
 
-        btnPlay.onclick = () => {
-            initAudio();
+        // Initialize canvas size
+        function resizeCanvas() {
+            const rect = canvas.getBoundingClientRect();
+            canvas.width = rect.width * window.devicePixelRatio;
+            canvas.height = rect.height * window.devicePixelRatio;
+            ctxCanvas.scale(window.devicePixelRatio, window.devicePixelRatio);
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Update progress periodically (more frequent when position data available)
+        function startProgressUpdates() {
+            // If we have position data, update more frequently
+            const hasPositionData = currentMetadata.position_ms && currentMetadata.duration_ms;
+            const interval = hasPositionData ? 500 : 2000; // 500ms if position data, 2s otherwise
+            
+            if (progressUpdateInterval) {
+                clearInterval(progressUpdateInterval);
+            }
+            progressUpdateInterval = setInterval(updateProgress, interval);
+        }
+        
+        let progressUpdateInterval;
+        startProgressUpdates(); // Start initial updates
+
+        // Media control button handlers
+        function sendControlCommand(command, value = null) {
+            if (wsControl && wsControl.readyState === WebSocket.OPEN) {
+                const msg = { command: command };
+                if (value !== null) {
+                    msg.value = value;
+                }
+                wsControl.send(JSON.stringify(msg));
+            }
+        }
+
+
+
+        btnPrevious.onclick = () => sendControlCommand('previous');
+        btnNext.onclick = () => sendControlCommand('next');
+        btnStop.onclick = () => sendControlCommand('stop');
+
+        btnConnect.onclick = () => {
+            statusEl.textContent = 'Connecting...';
+            // User initiated connect — enable autoplay when connected
+            shouldAutoplay = true;
             connect();
+            btnConnect.disabled = true;
+            // Start trying to autoplay in case sockets come up at different times
+            triggerAutoplay();
         };
 
-        btnStop.onclick = stop;
+        // Play/Pause: initialize audio and request play via control when possible
+        btnPlay.onclick = () => {
+            initAudio();
+            if (wsControl && wsControl.readyState === WebSocket.OPEN) {
+                sendControlCommand('play_pause');
+            } else {
+                statusEl.textContent = 'Connecting...';
+                connect();
+                const tryPlay = () => {
+                    if (wsControl && wsControl.readyState === WebSocket.OPEN) {
+                        sendControlCommand('play_pause');
+                    } else {
+                        setTimeout(tryPlay, 300);
+                    }
+                };
+                tryPlay();
+            }
+        };
+
+        // Volume control
+        volSlider.oninput = (e) => {
+            const volume = parseInt(e.target.value);
+            sendControlCommand('volume', volume);
+        }; 
+
+        // Progress bar click for seeking
+        const progressBar = document.querySelector('.progress-bar');
+        progressBar.onclick = (e) => {
+            if (currentMetadata.duration_ms) {
+                const rect = progressBar.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const percentage = clickX / rect.width;
+                const seekPosition = Math.floor(percentage * currentMetadata.duration_ms);
+                sendControlCommand('seek', seekPosition);
+            }
+        };
+
+        // Initial button states
+        btnStop.disabled = true;
+        btnPrevious.disabled = true;
+        btnNext.disabled = true;
+        btnPlay.disabled = true;
+        btnConnect.disabled = false;
+
+        // Initial status
+        statusEl.textContent = 'Ready - Click Connect to establish connection';
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            if (visualizerFrameId) {
+                cancelAnimationFrame(visualizerFrameId);
+            }
+            if (wsAudio) wsAudio.close();
+            if (wsMeta) wsMeta.close();
+            if (wsControl) wsControl.close();
+            if (audioCtx) audioCtx.close();
+        });
     </script>
 </body>
 </html>

@@ -11,7 +11,7 @@ import struct
 import subprocess
 import sys
 from collections import deque
-from typing import Dict, List
+from typing import Dict, List, Any
 from dataclasses import dataclass
 
 import aiohttp
@@ -66,6 +66,29 @@ class ServerConfig:
             self.CODECS = ["PCM"]
         if self.AUDIO is None:
             self.AUDIO = AudioConfig()
+
+
+# ============================================================================
+# Metadata Handler
+# ============================================================================
+
+class MetadataHandler:
+    """Handles metadata storage and updates."""
+
+    def __init__(self):
+        self._metadata: Dict[str, Any] = {}
+
+    def update(self, metadata: Dict[str, Any]) -> None:
+        """Update metadata with new values."""
+        self._metadata.update(metadata)
+
+    def get(self) -> Dict[str, Any]:
+        """Get current metadata."""
+        return self._metadata.copy()
+
+    def clear(self) -> None:
+        """Clear all metadata."""
+        self._metadata.clear()
 
 
 # ============================================================================
@@ -471,16 +494,15 @@ class AudioCastServer:
         self.stats_task = None
         self.playback_started = False
         
-        # Current track metadata
-        self.current_metadata = {
-            "title": None,
-            "artist": None,
-            "album": None,
-            "artwork_url": None,
-            "duration_ms": None,
-            "position_ms": None,
-            "is_playing": False
-        }
+        # Metadata handler
+        self.metadata_handler = MetadataHandler()
+        
+        # Control clients (controllers and devices connect here)
+        self.control_clients: List[web.WebSocketResponse] = []
+        
+        # Artwork storage
+        self._artwork_bytes: bytes = b""
+        self._artwork_timestamp: int = 0
     
     async def start(self):
         """Start server and all components."""
@@ -507,6 +529,7 @@ class AudioCastServer:
         app_stream.router.add_get('/stats', self.handle_stats_ws)
         app_stream.router.add_get('/metadata', self.handle_metadata_ws)
         app_stream.router.add_post('/metadata', self.handle_metadata_api)
+        app_stream.router.add_get('/artwork', self.handle_artwork)
 
         # --- Web/Player Server ---
         app_web = web.Application()
@@ -515,10 +538,12 @@ class AudioCastServer:
         app_web.router.add_get('/stream.wav', self.handle_stream_wav)
         app_web.router.add_get('/metadata', self.handle_metadata_ws)
         app_web.router.add_get('/api/metadata', self.handle_metadata_api)
+        app_web.router.add_get('/artwork', self.handle_artwork)
         
         try:
             import aiohttp_cors
-            cors = aiohttp_cors.setup(app_web, defaults={
+            # CORS for web app
+            cors_web = aiohttp_cors.setup(app_web, defaults={
             "*": aiohttp_cors.ResourceOptions(
                     allow_credentials=True,
                     expose_headers="*",
@@ -526,7 +551,18 @@ class AudioCastServer:
                 )
             })
             for route in list(app_web.router.routes()):
-                cors.add(route)
+                cors_web.add(route)
+            
+            # CORS for stream app (needed for control WebSocket)
+            cors_stream = aiohttp_cors.setup(app_stream, defaults={
+            "*": aiohttp_cors.ResourceOptions(
+                    allow_credentials=True,
+                    expose_headers="*",
+                    allow_headers="*",
+                )
+            })
+            for route in list(app_stream.router.routes()):
+                cors_stream.add(route)
         except ImportError:
             logger.warning("aiohttp_cors not installed - CORS headers not set")
 
@@ -583,7 +619,29 @@ class AudioCastServer:
             except Exception as e:
                 return web.json_response({"success": False, "error": str(e)}, status=400)
         else:
-            return web.json_response(self.current_metadata)
+            return web.json_response(self.metadata_handler.get())
+
+    async def handle_artwork(self, request: web.Request) -> web.Response:
+        """Serve downloaded artwork image."""
+        if self._artwork_bytes:
+            # Try to determine content type from bytes
+            content_type = "image/jpeg"  # default
+            if self._artwork_bytes.startswith(b'\xff\xd8'):
+                content_type = "image/jpeg"
+            elif self._artwork_bytes.startswith(b'\x89PNG'):
+                content_type = "image/png"
+            elif self._artwork_bytes.startswith(b'GIF8'):
+                content_type = "image/gif"
+            elif self._artwork_bytes.startswith(b'RIFF') and self._artwork_bytes[8:12] == b'WEBP':
+                content_type = "image/webp"
+            
+            return web.Response(
+                body=self._artwork_bytes,
+                content_type=content_type,
+                headers={'Cache-Control': f'max-age={3600}'}  # Cache for 1 hour
+            )
+        else:
+            return web.Response(status=404, text="No artwork available")
 
     async def handle_stream_wav(self, request: web.Request) -> web.StreamResponse:
         """Handler for HTTP audio stream (VLC/Players)."""
@@ -769,6 +827,20 @@ class AudioCastServer:
         
         peer = request.remote
         logger.info(f"Control client connected: {peer}")
+        # Register this control connection (could be a controller UI or a device)
+        self.control_clients.append(ws)
+
+    async def _broadcast_control(self, message: dict, exclude_ws: web.WebSocketResponse | None = None) -> None:
+        """Send a control message to all connected control clients except exclude_ws."""
+        for client in list(self.control_clients):
+            if client == exclude_ws:
+                continue
+            try:
+                await client.send_json(message)
+            except Exception as e:
+                logger.debug("Failed to send control message to client: %s", e)
+                if client in self.control_clients:
+                    self.control_clients.remove(client)
         
         # Send initial status
         try:
@@ -787,7 +859,10 @@ class AudioCastServer:
                     try:
                         data = json.loads(msg.data)
                         response = await self._handle_command(data)
+                        # Reply to sender
                         await ws.send_json(response)
+                        # Forward the incoming command to other control clients (e.g., device)
+                        await self._broadcast_control(data, exclude_ws=ws)
                     except json.JSONDecodeError:
                         await ws.send_json({"error": "Invalid JSON"})
                 elif msg.type == aiohttp.WSMsgType.ERROR:
@@ -796,14 +871,49 @@ class AudioCastServer:
             logger.error(f"Control error: {e}")
         finally:
             logger.info(f"Control client disconnected: {peer}")
+            # Clean up registered control client
+            if ws in self.control_clients:
+                self.control_clients.remove(ws)
         
         return ws
     
     async def _handle_command(self, data: dict) -> dict:
         """Handle incoming control commands."""
         command = data.get("command")
+        action = data.get("action")  # For Music Assistant compatibility
         
+        # Handle action-based commands (from Music Assistant)
+        if action:
+            if action == "play":
+                await self._cmd_play()
+                return {"action": "play", "success": True}
+            elif action == "pause":
+                await self._cmd_pause()
+                return {"action": "pause", "success": True}
+            elif action == "next":
+                await self._cmd_next()
+                return {"action": "next", "success": True}
+            elif action == "previous":
+                await self._cmd_previous()
+                return {"action": "previous", "success": True}
+            elif action == "seek":
+                position_ms = data.get("position_ms")
+                if isinstance(position_ms, (int, float)):
+                    await self._cmd_seek(int(position_ms))
+                    return {"action": "seek", "position_ms": position_ms, "success": True}
+                else:
+                    return {"error": "position_ms must be a number"}
+        
+        # Handle command-based commands
+        # Command-based controls (support both legacy and UI formats)
         if command == "volume":
+            # Support UI format: { command: 'volume', value: 80 }
+            if "value" in data and isinstance(data.get("value"), (int, float)):
+                level = int(data.get("value"))
+                success = self.volume_controller.set_volume(level)
+                return {"command": "volume", "level": self.volume_controller.get_volume(), "success": success}
+
+            # Legacy format: { command: 'volume', direction: 'up' }
             direction = data.get("direction")
             if direction == "up":
                 new_level = self.volume_controller.volume_up()
@@ -815,8 +925,8 @@ class AudioCastServer:
                 level = self.volume_controller.get_volume()
                 return {"command": "volume", "level": level, "success": level >= 0}
             else:
-                return {"error": "Invalid direction. Use 'up', 'down', or 'get'"}
-        
+                return {"error": "Invalid volume format. Provide 'value' or 'direction'"}
+
         elif command == "volume_set":
             level = data.get("level")
             if isinstance(level, (int, float)):
@@ -824,9 +934,123 @@ class AudioCastServer:
                 return {"command": "volume_set", "level": self.volume_controller.get_volume(), "success": success}
             else:
                 return {"error": "level must be a number (0-100)"}
-        
+
+        elif command == "play_pause":
+            # Toggle playback depending on current metadata
+            current_metadata = self.metadata_handler.get()
+            if current_metadata.get("is_playing"):
+                await self._cmd_pause()
+                return {"command": "play_pause", "state": "paused", "success": True}
+            else:
+                await self._cmd_play()
+                return {"command": "play_pause", "state": "playing", "success": True}
+
+        elif command == "stop":
+            # Map stop to pause for now
+            await self._cmd_pause()
+            return {"command": "stop", "success": True}
+
+        elif command in ["play", "pause", "next", "previous"]:
+            # Handle command-based playback controls
+            if command == "play":
+                await self._cmd_play()
+            elif command == "pause":
+                await self._cmd_pause()
+            elif command == "next":
+                await self._cmd_next()
+            elif command == "previous":
+                await self._cmd_previous()
+            return {"command": command, "success": True}
+
+        elif command == "seek":
+            # Support UI format: { command: 'seek', value: <ms> }
+            position_ms = data.get("position_ms") if data.get("position_ms") is not None else data.get("value")
+            if isinstance(position_ms, (int, float)):
+                await self._cmd_seek(int(position_ms))
+                return {"command": "seek", "position_ms": position_ms, "success": True}
+            else:
+                return {"error": "position_ms must be a number"}
+
         else:
             return {"error": f"Unknown command: {command}"}
+    
+    async def _cmd_play(self) -> None:
+        """Handle Play command."""
+        logger.info("Received play command")
+        # Update metadata to reflect playing state
+        current_metadata = self.metadata_handler.get()
+        if current_metadata.get("is_playing") != True:
+            current_metadata["is_playing"] = True
+            self.metadata_handler.update({"is_playing": True})
+            await self._broadcast_metadata()
+        # Send action to connected control devices
+        await self._broadcast_control({"action": "play"})
+
+    async def _cmd_pause(self) -> None:
+        """Handle Pause command."""
+        logger.info("Received pause command")
+        # Update metadata to reflect paused state
+        current_metadata = self.metadata_handler.get()
+        if current_metadata.get("is_playing") != False:
+            current_metadata["is_playing"] = False
+            self.metadata_handler.update({"is_playing": False})
+            await self._broadcast_metadata()
+        await self._broadcast_control({"action": "pause"})
+
+    async def _cmd_next(self) -> None:
+        """Handle Next command."""
+        logger.info("Received next command")
+        # For standalone server, we could implement track navigation
+        # For now, just log and acknowledge
+        await self._broadcast_control({"action": "next"})
+        pass
+    
+    async def _cmd_previous(self) -> None:
+        """Handle Previous command."""
+        logger.info("Received previous command")
+        # For standalone server, we could implement track navigation
+        # For now, just log and acknowledge
+        await self._broadcast_control({"action": "previous"})
+        pass
+    
+    async def _cmd_seek(self, position_ms: int) -> None:
+        """Handle Seek command."""
+        logger.info(f"Received seek command: {position_ms}ms")
+        # Update metadata to reflect new position
+        self.metadata_handler.update({"position_ms": position_ms})
+        await self._broadcast_metadata()
+        await self._broadcast_control({"action": "seek", "position_ms": position_ms})
+    
+    async def _cmd_pause(self) -> None:
+        """Handle Pause command."""
+        logger.info("Received pause command")
+        # Update metadata to reflect paused state
+        current_metadata = self.metadata_handler.get()
+        if current_metadata.get("is_playing") != False:
+            current_metadata["is_playing"] = False
+            self.metadata_handler.update({"is_playing": False})
+            await self._broadcast_metadata()
+    
+    async def _cmd_next(self) -> None:
+        """Handle Next command."""
+        logger.info("Received next command")
+        # For standalone server, we could implement track navigation
+        # For now, just log and acknowledge
+        pass
+    
+    async def _cmd_previous(self) -> None:
+        """Handle Previous command."""
+        logger.info("Received previous command")
+        # For standalone server, we could implement track navigation
+        # For now, just log and acknowledge
+        pass
+    
+    async def _cmd_seek(self, position_ms: int) -> None:
+        """Handle Seek command."""
+        logger.info(f"Received seek command: {position_ms}ms")
+        # Update metadata to reflect new position
+        self.metadata_handler.update({"position_ms": position_ms})
+        await self._broadcast_metadata()
     
     async def handle_metadata_ws(self, request: web.Request) -> web.WebSocketResponse:
         """
@@ -847,7 +1071,7 @@ class AudioCastServer:
         try:
             await ws.send_json({
                 "type": "metadata",
-                "data": self.current_metadata
+                "data": self.metadata_handler.get()
             })
         except:
             pass
@@ -869,7 +1093,7 @@ class AudioCastServer:
                             # Client requests current metadata
                             await ws.send_json({
                                 "type": "metadata",
-                                "data": self.current_metadata
+                                "data": self.metadata_handler.get()
                             })
                             
                         elif msg_type == "clear":
@@ -895,17 +1119,20 @@ class AudioCastServer:
     async def _update_metadata(self, metadata: dict):
         """Update current metadata and broadcast to all subscribers."""
         # Track if title/artist changed for logging
-        old_title = self.current_metadata.get("title")
-        old_artist = self.current_metadata.get("artist")
+        old_title = self.metadata_handler.get().get("title")
+        old_artist = self.metadata_handler.get().get("artist")
         
-        # Update fields if provided
-        for key in ["title", "artist", "album", "artwork_url", "duration_ms", "position_ms", "is_playing"]:
-            if key in metadata:
-                self.current_metadata[key] = metadata[key]
+        # Update metadata
+        self.metadata_handler.update(metadata)
+        
+        # Handle artwork download
+        artwork_url = metadata.get("artwork_url") or metadata.get("artworkUrl")
+        if artwork_url and isinstance(artwork_url, str) and artwork_url.startswith("http"):
+            asyncio.create_task(self._download_artwork(artwork_url))
         
         # Only log if title or artist changed
-        new_title = self.current_metadata.get("title")
-        new_artist = self.current_metadata.get("artist")
+        new_title = self.metadata_handler.get().get("title")
+        new_artist = self.metadata_handler.get().get("artist")
         if self.verbose and (new_title != old_title or new_artist != old_artist):
             title = new_title or "Unknown"
             artist = new_artist or "Unknown"
@@ -916,28 +1143,38 @@ class AudioCastServer:
     
     async def _clear_metadata(self):
         """Clear all metadata."""
-        self.current_metadata = {
-            "title": None,
-            "artist": None,
-            "album": None,
-            "artwork_url": None,
-            "duration_ms": None,
-            "position_ms": None,
-            "is_playing": False
-        }
+        self.metadata_handler.clear()
         await self._broadcast_metadata()
     
     async def _broadcast_metadata(self):
         """Send current metadata to all subscribers."""
         message = {
             "type": "metadata",
-            "data": self.current_metadata
+            "data": self.metadata_handler.get()
         }
         for client in self.metadata_clients[:]:
             try:
                 await client.send_json(message)
             except:
                 self.metadata_clients.remove(client)
+    
+    async def _download_artwork(self, artwork_url: str) -> None:
+        """Download artwork from URL and store it."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(artwork_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        self._artwork_bytes = await response.read()
+                        self._artwork_timestamp = int(asyncio.get_event_loop().time() * 1000)
+                        logger.debug(f"Downloaded artwork: {len(self._artwork_bytes)} bytes")
+                        # Update metadata to point to local artwork
+                        current_metadata = self.metadata_handler.get()
+                        if "artwork_url" in current_metadata or "artworkUrl" in current_metadata:
+                            current_metadata["artwork_url"] = "/artwork"
+                            self.metadata_handler.update({"artwork_url": "/artwork"})
+                            await self._broadcast_metadata()
+        except Exception as e:
+            logger.debug(f"Failed to download artwork: {e}")
     
     async def _stats_loop(self):
         """Send statistics to connected clients."""
