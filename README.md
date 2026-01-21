@@ -182,7 +182,7 @@ Edit `config_examples.py` or modify the `ServerConfig` class:
 class ServerConfig:
     SERVER_NAME: str = "My AriaCast Speaker"
     VERSION: str = "1.0"
-    PLATFORM: str = "Music Assistant"
+    PLATFORM: str = "Ubuntu"
     DISCOVERY_PORT: int = 12888
     STREAMING_PORT: int = 12889
     WEB_PORT: int = 8090
@@ -190,15 +190,6 @@ class ServerConfig:
     AUDIO: AudioConfig = AudioConfig()
 ```
 
-### Music Assistant Plugin Configuration
-
-When setting up the AriaCast provider in Music Assistant:
-
-- **Connected Music Assistant Player**: Choose target player or set to "Auto"
-- **Allow manual player switching**: Enable to select AriaCast on any player
-- **Server Name**: Display name for device discovery
-- **Streaming Port**: WebSocket port (default: 12889)
-- **Discovery Port**: UDP discovery port (default: 12888)
 
 ## 📋 Requirements
 
@@ -244,11 +235,3 @@ Local Area Network
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit pull requests, report issues, or suggest enhancements.
-
-## 📄 License
-
-MIT License - see LICENSE file for details
-
----
-
-**Made with ❤️ for seamless audio streaming**
