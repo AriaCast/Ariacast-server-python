@@ -724,18 +724,24 @@ function drawVisualizer(currentTime = 0) {
             if (now - lastMetadataUpdate < 100) return; // Minimum 100ms between updates
             lastMetadataUpdate = now;
 
-            currentMetadata = data || {};
+            // Normalize data keys: support both snake_case and camelCase from server
+            const normalized = Object.assign({}, data || {});
+            if (typeof normalized.positionMs === 'number' && normalized.position_ms == null) normalized.position_ms = normalized.positionMs;
+            if (typeof normalized.durationMs === 'number' && normalized.duration_ms == null) normalized.duration_ms = normalized.durationMs;
+            if (typeof normalized.isPlaying === 'boolean' && normalized.is_playing == null) normalized.is_playing = normalized.isPlaying;
+
+            currentMetadata = normalized;
 
             // Track last known position timestamp so we can estimate client-side progress
-            if (typeof data.position_ms === 'number') {
-                lastPositionMs = data.position_ms;
+            if (typeof normalized.position_ms === 'number') {
+                lastPositionMs = normalized.position_ms;
                 lastPositionTs = Date.now();
             }
 
             // Batch DOM updates for better performance
-            const title = data.title || '-';
-            const artist = data.artist || '-';
-            const album = data.album || '-';
+            const title = normalized.title || '-';
+            const artist = normalized.artist || '-';
+            const album = normalized.album || '-';
 
             // Only update if changed
             const titleEl = document.getElementById('meta-title');
@@ -747,10 +753,10 @@ function drawVisualizer(currentTime = 0) {
             if (albumEl.textContent !== album) albumEl.textContent = album;
             
             // Update playback state indicator
-            updatePlaybackState(data.is_playing);
+            updatePlaybackState(normalized.is_playing);
 
             // Handle artwork with loading state
-            updateArtwork(data);
+            updateArtwork(normalized);
             updateProgress();
             startProgressUpdates(); // Adjust update frequency based on available data
         }
@@ -1074,6 +1080,37 @@ function drawVisualizer(currentTime = 0) {
         
         let progressUpdateInterval;
         startProgressUpdates(); // Start initial updates
+
+        // Poll server metadata every 500ms to ensure position updates are reflected
+        let metadataPollInterval = null;
+        async function fetchMetadata() {
+            try {
+                const res = await fetch('/api/metadata', { cache: 'no-store' });
+                if (!res.ok) return;
+                const json = await res.json();
+                // Normalize server keys before passing
+                updateMetadata(json || {});
+            } catch (e) {
+                // Fail silently; will retry
+                // console.debug('Metadata poll failed', e);
+            }
+        }
+
+        function startMetadataPolling() {
+            if (metadataPollInterval) return;
+            fetchMetadata(); // immediate
+            metadataPollInterval = setInterval(fetchMetadata, 500);
+        }
+
+        function stopMetadataPolling() {
+            if (metadataPollInterval) {
+                clearInterval(metadataPollInterval);
+                metadataPollInterval = null;
+            }
+        }
+
+        // Start polling when the page loads; it will continue whether or not wsMeta is connected
+        startMetadataPolling();
 
         // Media control button handlers
         function sendControlCommand(command, value = null) {

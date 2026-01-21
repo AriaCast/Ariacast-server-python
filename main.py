@@ -830,33 +830,21 @@ class AudioCastServer:
         # Register this control connection (could be a controller UI or a device)
         self.control_clients.append(ws)
 
-    async def _broadcast_control(self, message: dict, exclude_ws: web.WebSocketResponse | None = None) -> None:
-        """Send a control message to all connected control clients except exclude_ws."""
-        for client in list(self.control_clients):
-            if client == exclude_ws:
-                continue
-            try:
-                await client.send_json(message)
-            except Exception as e:
-                logger.debug("Failed to send control message to client: %s", e)
-                if client in self.control_clients:
-                    self.control_clients.remove(client)
-        
-        # Send initial status
+        # Send initial status to this client
         try:
             await ws.send_json({
                 "status": "READY",
                 "volume_available": self.volume_controller.available,
                 "current_volume": self.volume_controller.get_volume()
             })
-        except:
-            await ws.close()
-            return ws
-        
+        except Exception:
+            logger.debug("Failed to send initial control status to client")
+
         try:
             async for msg in ws:
                 if msg.type == aiohttp.WSMsgType.TEXT:
                     try:
+                        logger.info("Control message received from %s: %s", peer, msg.data)
                         data = json.loads(msg.data)
                         response = await self._handle_command(data)
                         # Reply to sender
@@ -874,8 +862,22 @@ class AudioCastServer:
             # Clean up registered control client
             if ws in self.control_clients:
                 self.control_clients.remove(ws)
-        
+
         return ws
+
+    async def _broadcast_control(self, message: dict, exclude_ws: web.WebSocketResponse | None = None) -> None:
+        """Send a control message to all connected control clients except exclude_ws."""
+        logger.info("Broadcasting control message to control clients: %s", message)
+        for client in list(self.control_clients):
+            if client == exclude_ws:
+                continue
+            try:
+                await client.send_json(message)
+            except Exception as e:
+                logger.debug("Failed to send control message to client: %s", e)
+                if client in self.control_clients:
+                    self.control_clients.remove(client)
+        
     
     async def _handle_command(self, data: dict) -> dict:
         """Handle incoming control commands."""
@@ -1021,36 +1023,6 @@ class AudioCastServer:
         await self._broadcast_metadata()
         await self._broadcast_control({"action": "seek", "position_ms": position_ms})
     
-    async def _cmd_pause(self) -> None:
-        """Handle Pause command."""
-        logger.info("Received pause command")
-        # Update metadata to reflect paused state
-        current_metadata = self.metadata_handler.get()
-        if current_metadata.get("is_playing") != False:
-            current_metadata["is_playing"] = False
-            self.metadata_handler.update({"is_playing": False})
-            await self._broadcast_metadata()
-    
-    async def _cmd_next(self) -> None:
-        """Handle Next command."""
-        logger.info("Received next command")
-        # For standalone server, we could implement track navigation
-        # For now, just log and acknowledge
-        pass
-    
-    async def _cmd_previous(self) -> None:
-        """Handle Previous command."""
-        logger.info("Received previous command")
-        # For standalone server, we could implement track navigation
-        # For now, just log and acknowledge
-        pass
-    
-    async def _cmd_seek(self, position_ms: int) -> None:
-        """Handle Seek command."""
-        logger.info(f"Received seek command: {position_ms}ms")
-        # Update metadata to reflect new position
-        self.metadata_handler.update({"position_ms": position_ms})
-        await self._broadcast_metadata()
     
     async def handle_metadata_ws(self, request: web.Request) -> web.WebSocketResponse:
         """
