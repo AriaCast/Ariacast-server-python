@@ -30,10 +30,13 @@
             width: 100%;
             height: 100%;
             background: var(--artwork-bg, linear-gradient(135deg, #667eea 0%, #764ba2 100%)) center/cover no-repeat;
-            filter: blur(20px) brightness(0.3) saturate(1.2);
+            /* Reactive background controls: --bg-scale, --bg-sat, --bg-bright */
+            filter: blur(20px) brightness(var(--bg-bright, 0.3)) saturate(var(--bg-sat, 1.2));
+            transform: scale(var(--bg-scale, 1));
+            transform-origin: center;
             z-index: -1;
             opacity: 0;
-            transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1), transform 150ms linear, filter 150ms linear;
         }
 
         body.artwork-loaded::before {
@@ -553,6 +556,19 @@
         const VISUALIZER_FPS = 30; // Limit to 30 FPS
         const VISUALIZER_INTERVAL = 1000 / VISUALIZER_FPS;
 
+        // Background reaction parameters (bass-responsive)
+        let bgScale = 1;
+        let bgSat = 1.2;
+        let bgBright = 0.3;
+        const BG_SCALE_MIN = 1.0;
+        const BG_SCALE_MAX = 1.08;
+        const BG_SAT_MIN = 1.0;
+        const BG_SAT_MAX = 1.6;
+        const BG_BRIGHT_MIN = 0.28;
+        const BG_BRIGHT_MAX = 0.42;
+        const BG_SMOOTH = 0.12; // smoothing factor for animations
+
+
         // Position tracking for progress bar
         let lastPositionMs = 0;
         let lastPositionTs = 0;
@@ -674,6 +690,31 @@ function drawVisualizer(currentTime = 0) {
             const height = canvas.height;
 
             analyser.getByteFrequencyData(dataArray);
+
+            // Compute bass energy (average of lowest bins)
+            try {
+                const bassBins = Math.max(2, Math.min(8, Math.floor(dataArray.length * 0.06)));
+                let sum = 0;
+                for (let i = 0; i < bassBins; i++) sum += dataArray[i];
+                const avg = sum / bassBins; // 0..255
+                const norm = Math.max(0, Math.min(1, avg / 255));
+
+                // Map normalized bass to scale/saturation/brightness
+                const targetScale = BG_SCALE_MIN + norm * (BG_SCALE_MAX - BG_SCALE_MIN);
+                const targetSat = BG_SAT_MIN + Math.pow(norm, 1.2) * (BG_SAT_MAX - BG_SAT_MIN);
+                const targetBright = BG_BRIGHT_MIN + Math.pow(norm, 1.1) * (BG_BRIGHT_MAX - BG_BRIGHT_MIN);
+
+                // Smooth changes for a pleasant effect
+                bgScale += (targetScale - bgScale) * BG_SMOOTH;
+                bgSat += (targetSat - bgSat) * BG_SMOOTH;
+                bgBright += (targetBright - bgBright) * BG_SMOOTH;
+
+                document.body.style.setProperty('--bg-scale', bgScale.toFixed(3));
+                document.body.style.setProperty('--bg-sat', bgSat.toFixed(3));
+                document.body.style.setProperty('--bg-bright', bgBright.toFixed(3));
+            } catch (e) {
+                // ignore - visualizer may not be available yet
+            }
 
             // Clear with fade effect
             ctxCanvas.fillStyle = 'rgba(255, 255, 255, 0.08)';
