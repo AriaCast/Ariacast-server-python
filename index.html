@@ -30,8 +30,8 @@
             width: 100%;
             height: 100%;
             background: var(--artwork-bg, linear-gradient(135deg, #667eea 0%, #764ba2 100%)) center/cover no-repeat;
-            /* Reactive background controls: --bg-scale, --bg-sat, --bg-bright */
-            filter: blur(20px) brightness(var(--bg-bright, 0.3)) saturate(var(--bg-sat, 1.2));
+            /* Reactive background controls: --bg-scale, --bg-sat, --bg-bright, --bg-hue */
+            filter: blur(20px) brightness(var(--bg-bright, 0.3)) saturate(var(--bg-sat, 1.2)) hue-rotate(var(--bg-hue, 0deg));
             transform: scale(var(--bg-scale, 1));
             transform-origin: center;
             z-index: -1;
@@ -229,6 +229,51 @@
             justify-content: center;
             gap: 16px;
             margin-bottom: 24px;
+        }
+
+        /* Compact intensity selector */
+        .intensity-select {
+            background: rgba(255,255,255,0.08);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.08);
+            padding: 6px 8px;
+            border-radius: 8px;
+            font-size: 13px;
+            -webkit-appearance: none;
+            appearance: none;
+            cursor: pointer;
+        }
+
+        .intensity-select option { color: #111; }
+
+        /* Power button */
+        .power-btn {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.08);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+        }
+        .power-btn.active {
+            background: linear-gradient(135deg, #ff8359 0%, #ff3b3b 100%);
+            box-shadow: 0 6px 18px rgba(255, 59, 59, 0.24);
+            transform: translateY(-1px);
+        }
+
+        /* Footer controls row */
+        .footer-controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 12px;
+            align-items: center;
+        }
+
+        @media (max-width: 480px) {
+            .footer-controls { margin-top: 10px; }
+            .intensity-select { padding: 6px 6px; font-size: 12px; }
         }
 
         .control-btn {
@@ -490,6 +535,7 @@
             <div class="controls">
                 <button id="btn-previous" class="control-btn" title="Previous Track">⏮</button>
                 <button id="btn-connect" class="control-btn connect" title="Connect">🔌</button>
+
                 <button id="btn-play" class="control-btn play" title="Start Listening">▶</button>
                 <button id="btn-stop" class="control-btn stop" disabled title="Stop">⏹</button>
                 <button id="btn-next" class="control-btn" title="Next Track">⏭</button>
@@ -532,6 +578,20 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Footer controls (intensity selector) -->
+            <div class="footer-controls" style="display:flex;justify-content:center;gap:12px;margin-top:12px;">
+                <label for="bg-intensity" style="display:inline-flex;align-items:center;gap:8px;color:rgba(255,255,255,0.8);font-size:13px;">
+                    Intensity
+                    <select id="bg-intensity" class="intensity-select" title="Background intensity">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </label>
+
+                <button id="btn-power" class="power-btn" title="Power Mode (toggle)">⚡</button>
+            </div>
         </div>
     </div>
 
@@ -556,17 +616,45 @@
         const VISUALIZER_FPS = 30; // Limit to 30 FPS
         const VISUALIZER_INTERVAL = 1000 / VISUALIZER_FPS;
 
-        // Background reaction parameters (bass-responsive)
+        // Background reaction parameters (bass-responsive) - tuned for less false positives
         let bgScale = 1;
-        let bgSat = 1.2;
-        let bgBright = 0.3;
+        let bgSat = 1.12;
+        let bgBright = 0.32;
+        // Reactive ranges (punchy but controlled)
         const BG_SCALE_MIN = 1.0;
-        const BG_SCALE_MAX = 1.08;
-        const BG_SAT_MIN = 1.0;
-        const BG_SAT_MAX = 1.6;
-        const BG_BRIGHT_MIN = 0.28;
-        const BG_BRIGHT_MAX = 0.42;
-        const BG_SMOOTH = 0.12; // smoothing factor for animations
+        const BG_SCALE_MAX = 1.08;   // moderate zoom
+        const BG_SAT_MIN = 1.02;
+        const BG_SAT_MAX = 1.45;     // noticeable but not overwhelming
+        const BG_BRIGHT_MIN = 0.30;
+        const BG_BRIGHT_MAX = 0.44;  // gentle brightness boost
+        let BG_SMOOTH = 0.12;      // moderate smoothing to reduce jitter (becomes adjustable)
+        const BG_MIN_THRESHOLD = 0.02; // small fixed floor
+        const BG_BASS_EXP = 1.6;     // >1 to reduce small-value amplification
+        let BG_SENSITIVITY = 1.0;  // neutral sensitivity (adjustable)
+        // Intensity multiplier (0.6 low, 1 medium, 1.6 high)
+        let BG_INTENSITY = 1.0;
+        function setBGIntensity(level) {
+            if (level === 'low') {
+                BG_INTENSITY = 0.6; BG_SMOOTH = 0.18; BG_SENSITIVITY = 0.9;
+            } else if (level === 'high') {
+                BG_INTENSITY = 1.6; BG_SMOOTH = 0.06; BG_SENSITIVITY = 1.2;
+            } else {
+                BG_INTENSITY = 1.0; BG_SMOOTH = 0.12; BG_SENSITIVITY = 1.0;
+            }
+        }
+        // Adaptive noise floor (very slow smoothing)
+        let noiseFloor = 0;
+        const NOISE_SMOOTH = 0.01;
+        let normSmoothed = 0;        // smoothed normalized band value
+
+        // RMS (time-domain) for overall loudness
+        let rmsSmoothed = 0;
+        const RMS_SMOOTH = 0.08;
+        const POWER_MULTIPLIER = 2.8; // how much 'explosion' Power mode applies
+        let powerMode = false;
+
+        // Initialize with medium intensity
+        setBGIntensity('medium');
 
 
         // Position tracking for progress bar
@@ -691,27 +779,91 @@ function drawVisualizer(currentTime = 0) {
 
             analyser.getByteFrequencyData(dataArray);
 
-            // Compute bass energy (average of lowest bins)
+            // Compute whole-spectrum energies (low/mid/high) + spectral centroid
             try {
-                const bassBins = Math.max(2, Math.min(8, Math.floor(dataArray.length * 0.06)));
-                let sum = 0;
-                for (let i = 0; i < bassBins; i++) sum += dataArray[i];
-                const avg = sum / bassBins; // 0..255
-                const norm = Math.max(0, Math.min(1, avg / 255));
+                const bins = dataArray.length;
+                const lowEnd = Math.max(2, Math.floor(bins * 0.08));   // ~sub-bass
+                const midStart = lowEnd;
+                const midEnd = Math.max(midStart + 1, Math.floor(bins * 0.35));
+                const highStart = midEnd;
 
-                // Map normalized bass to scale/saturation/brightness
-                const targetScale = BG_SCALE_MIN + norm * (BG_SCALE_MAX - BG_SCALE_MIN);
-                const targetSat = BG_SAT_MIN + Math.pow(norm, 1.2) * (BG_SAT_MAX - BG_SAT_MIN);
-                const targetBright = BG_BRIGHT_MIN + Math.pow(norm, 1.1) * (BG_BRIGHT_MAX - BG_BRIGHT_MIN);
+                // Helpers
+                function avgRange(start, end) {
+                    let sum = 0, count = 0;
+                    for (let i = start; i < end && i < bins; i++) { sum += dataArray[i]; count++; }
+                    return count ? (sum / count) / 255 : 0;
+                }
 
-                // Smooth changes for a pleasant effect
+                const low = avgRange(0, lowEnd);
+                const mid = avgRange(midStart, midEnd);
+                const high = avgRange(highStart, bins);
+
+                // Spectral centroid (0..1)
+                let centroidNum = 0, centroidDen = 0;
+                for (let i = 0; i < bins; i++) {
+                    const v = dataArray[i];
+                    centroidNum += i * v;
+                    centroidDen += v;
+                }
+                const centroid = centroidDen ? (centroidNum / centroidDen) / bins : 0.5;
+
+                // Adaptive noise floor per overall energy (slow)
+                const overall = (low + mid + high) / 3;
+                noiseFloor += (overall - noiseFloor) * NOISE_SMOOTH;
+
+                // Time-domain RMS for loudness
+                const timeData = new Uint8Array(analyser.fftSize);
+                analyser.getByteTimeDomainData(timeData);
+                let sumsq = 0;
+                for (let i = 0; i < timeData.length; i++) {
+                    const v = (timeData[i] - 128) / 128;
+                    sumsq += v * v;
+                }
+                const rms = Math.sqrt(sumsq / timeData.length); // 0..1
+                rmsSmoothed += (rms - rmsSmoothed) * RMS_SMOOTH;
+
+                // Subtract floor and apply sensitivity + intensity
+                const applyFloor = (v) => Math.max(0, v - Math.max(BG_MIN_THRESHOLD, noiseFloor * 1.05));
+                const lowA = Math.pow(Math.max(0, applyFloor(low) * BG_SENSITIVITY), BG_BASS_EXP);
+                const midA = Math.pow(Math.max(0, applyFloor(mid) * BG_SENSITIVITY), BG_BASS_EXP);
+                const highA = Math.pow(Math.max(0, applyFloor(high) * BG_SENSITIVITY), BG_BASS_EXP);
+
+                // Smooth each band into a single control value (weighted)
+                const combined = (0.6 * lowA + 0.9 * midA + 1.2 * highA) / (0.6 + 0.9 + 1.2);
+                normSmoothed += (combined - normSmoothed) * BG_SMOOTH;
+
+                // Combine spectral and RMS loudness, favor RMS for explosive effect
+                let finalDrive = Math.max(normSmoothed, rmsSmoothed * 1.1);
+
+                // If power mode is active, exaggerate based on RMS
+                if (powerMode) {
+                    finalDrive = Math.min(1, finalDrive * POWER_MULTIPLIER);
+                }
+
+                // Map bands to visual parameters using finalDrive and band drives
+                const scaleDrive = Math.min(1, (lowA * 0.7 + midA * 0.3 + finalDrive * 0.9) * BG_INTENSITY);
+                const satDrive = Math.min(1, (midA + finalDrive * 0.6) * BG_INTENSITY);
+                const brightDrive = Math.min(1, (highA + finalDrive * 0.4) * BG_INTENSITY);
+
+                const hueDeg = (centroid - 0.5) * 36 + (finalDrive - 0.5) * 18; // add some hue shift on loudness
+
+                const targetScale = BG_SCALE_MIN + scaleDrive * (BG_SCALE_MAX - BG_SCALE_MIN);
+                const targetSat = BG_SAT_MIN + satDrive * (BG_SAT_MAX - BG_SAT_MIN);
+                const targetBright = BG_BRIGHT_MIN + brightDrive * (BG_BRIGHT_MAX - BG_BRIGHT_MIN);
+
+                // Gentle smoothing for bg variables
                 bgScale += (targetScale - bgScale) * BG_SMOOTH;
                 bgSat += (targetSat - bgSat) * BG_SMOOTH;
                 bgBright += (targetBright - bgBright) * BG_SMOOTH;
 
-                document.body.style.setProperty('--bg-scale', bgScale.toFixed(3));
+                // Smooth hue a bit separately
+                const currentHue = parseFloat(document.body.style.getPropertyValue('--bg-hue') || '0');
+                const nextHue = currentHue + (hueDeg - currentHue) * (BG_SMOOTH * 0.9);
+
+                document.body.style.setProperty('--bg-scale', bgScale.toFixed(4));
                 document.body.style.setProperty('--bg-sat', bgSat.toFixed(3));
                 document.body.style.setProperty('--bg-bright', bgBright.toFixed(3));
+                document.body.style.setProperty('--bg-hue', `${nextHue.toFixed(2)}deg`);
             } catch (e) {
                 // ignore - visualizer may not be available yet
             }
@@ -1223,6 +1375,14 @@ function drawVisualizer(currentTime = 0) {
         btnNext.disabled = true;
         btnPlay.disabled = true;
         btnConnect.disabled = false;
+
+        // Wire up intensity selector
+        const intensitySelect = document.getElementById('bg-intensity');
+        if (intensitySelect) {
+            intensitySelect.onchange = (e) => setBGIntensity(e.target.value);
+            // Ensure UI reflects current preset
+            intensitySelect.value = 'medium';
+        }
 
         // Initial status
         statusEl.textContent = 'Ready - Click Connect to establish connection';
