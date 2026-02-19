@@ -4,3 +4,5 @@ aiohttp_cors>=0.7.0
 sounddevice>=0.4.6
 numpy>=1.24.0
 pycaw>=20230407  # Windows volume control
+av>=12.0.0
+Pillow>=10.0.0
