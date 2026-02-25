@@ -38,7 +38,7 @@ Now featuring **Music Assistant plugin integration** and a **modern, artwork-enh
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/ariacast-server.git
+   git clone https://github.com/AirPlr/ariacast-server.git
    cd ariacast-server
    ```
 
