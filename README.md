@@ -38,8 +38,8 @@ Now featuring **Music Assistant plugin integration** and a **modern, artwork-enh
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/AirPlr/ariacast-server-python.git
-   cd ariacast-server-python
+   git clone https://github.com/AriaCast/Ariacast-server-python.git
+   cd Ariacast-server-python
    ```
 
 2. **Install dependencies**:
